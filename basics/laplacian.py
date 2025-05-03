@@ -142,6 +142,11 @@ def spectral_embedding_2d(eigenvectors, eigenvalues, adjacency, dims=[1, 2]):
             if adjacency[i, j] > 0:
                 ax.plot([x[i], x[j]], [y[i], y[j]], 'k-', alpha=0.3)
     
+    n = len(x)
+    for i in range(n):
+        ax.annotate(f"{i}", (x[i], y[i]), fontsize=9, 
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.7))
+
     ax.set_title(f'2D Spectral Embedding: Eigenvectors {dims[0]} and {dims[1]}')
     ax.set_xlabel(f'Eigenvector {dims[0]} (λ = {eigenvalues[dims[0]]:.4f})')
     ax.set_ylabel(f'Eigenvector {dims[1]} (λ = {eigenvalues[dims[1]]:.4f})')
@@ -168,6 +173,11 @@ def spectral_embedding_3d(eigenvectors, eigenvalues, adjacency, dims=[1, 2, 3]):
         for j in range(i+1, len(adjacency)):
             if adjacency[i, j] > 0:
                 ax.plot([x[i], x[j]], [y[i], y[j]], [z[i], z[j]], 'k-', alpha=0.1)
+    
+    n = len(x)
+    for i in range(n):
+        ax.text(x[i], y[i], z[i], f"{i}", size=8, zorder=1, color='black',
+                   bbox=dict(facecolor='white', alpha=0.7, pad=1))
     
     ax.set_title(f'3D Spectral Embedding: Eigenvectors {dims[0]}, {dims[1]}, and {dims[2]}')
     ax.set_xlabel(f'Eigenvector {dims[0]} (λ = {eigenvalues[dims[0]]:.4f})')
@@ -202,28 +212,52 @@ def multi_dim_spectral_embedding(eigenvectors, eigenvalues, adjacency):
     ax1 = fig.add_subplot(2, 2, 1)
     x1, y1 = eigenvectors[:, 1], eigenvectors[:, 2]
     scatter1 = ax1.scatter(x1, y1, c=eigenvectors[:, 1], cmap='viridis', s=50, alpha=0.8)
+    
+    n = len(x1)
+    for i in range(n):
+        ax1.annotate(f"{i}", (x1[i], y1[i]), fontsize=8, 
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.7))
+    
     ax1.set_title(f'Eigenvectors 1-2 (λ = {eigenvalues[1]:.4f}, {eigenvalues[2]:.4f})')
+    ax1.grid(True, linestyle='--', alpha=0.7)
     
     ax2 = fig.add_subplot(2, 2, 2)
     x2, y2 = eigenvectors[:, 2], eigenvectors[:, 3]
     scatter2 = ax2.scatter(x2, y2, c=eigenvectors[:, 1], cmap='viridis', s=50, alpha=0.8)
+    
+    for i in range(n):
+        ax2.annotate(f"{i}", (x2[i], y2[i]), fontsize=8, 
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.7))
+    
     ax2.set_title(f'Eigenvectors 2-3 (λ = {eigenvalues[2]:.4f}, {eigenvalues[3]:.4f})')
+    ax2.grid(True, linestyle='--', alpha=0.7)
     
     # 3D embeddings
     ax3 = fig.add_subplot(2, 2, 3, projection='3d')
     x3, y3, z3 = eigenvectors[:, 1], eigenvectors[:, 2], eigenvectors[:, 3]
     scatter3 = ax3.scatter(x3, y3, z3, c=eigenvectors[:, 1], cmap='viridis', s=50, alpha=0.8)
+    
+    for i in range(n):
+        ax3.text(x3[i], y3[i], z3[i], f"{i}", size=8, zorder=1, color='black', 
+                    bbox=dict(facecolor='white', alpha=0.7, pad=1))
+    
     ax3.set_title(f'Eigenvectors 1-2-3')
     
     ax4 = fig.add_subplot(2, 2, 4, projection='3d')
     x4, y4, z4 = eigenvectors[:, 2], eigenvectors[:, 3], eigenvectors[:, 4]
     scatter4 = ax4.scatter(x4, y4, z4, c=eigenvectors[:, 1], cmap='viridis', s=50, alpha=0.8)
+    
+    for i in range(n):
+        ax4.text(x4[i], y4[i], z4[i], f"{i}", size=8, zorder=1, color='black', 
+                    bbox=dict(facecolor='white', alpha=0.7, pad=1))
+            
     ax4.set_title(f'Eigenvectors 2-3-4')
     
     for i in range(len(adjacency)):
         for j in range(i+1, len(adjacency)):
             if adjacency[i, j] > 0:
                 ax3.plot([x3[i], x3[j]], [y3[i], y3[j]], [z3[i], z3[j]], 'k-', alpha=0.05)
+                ax4.plot([x4[i], x4[j]], [y4[i], y4[j]], [z4[i], z4[j]], 'k-', alpha=0.05)
     
     plt.tight_layout()
     return fig
@@ -271,7 +305,6 @@ def main(grid_size=10, normalized=True, top_k=10, show_plots=True):
     eigenvalues, eigenvectors, adjacency, visualizations = visualize_laplacian_spectrum(
         grid_size, normalized, top_k)
     
-    print("\nFirst 10 eigenvalues:")
     for i, ev in enumerate(eigenvalues):
         print(f"λ{i} = {ev:.6f}")
     
@@ -283,7 +316,7 @@ def main(grid_size=10, normalized=True, top_k=10, show_plots=True):
     return eigenvalues, eigenvectors, adjacency, visualizations
 
 if __name__ == "__main__":
-    grid_size = 4
+    grid_size = 5
     normalized = True
     top_k = 10
     
