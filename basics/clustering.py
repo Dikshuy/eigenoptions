@@ -7,7 +7,6 @@ from scipy.linalg import eigh
 import gin
 import gym
 from minigrid_basics.envs import mon_minigrid
-from gym_minigrid import minigrid
 from gym_minigrid.wrappers import RGBImgObsWrapper
 from minigrid_basics.custom_wrappers import tabular_wrapper, mdp_wrapper
 from minigrid_basics.custom_wrappers.coloring_wrapper import ColoringWrapper
@@ -36,7 +35,7 @@ class SpectralClustering:
         for i in range(self.env_size):
             for j in range(self.grid.height):
                 cell = self.grid.get(i, j)
-                if cell is None or not isinstance(cell, minigrid.Wall):
+                if cell is None or (cell is not None and cell.type != 'wall'):
                     self.valid_states.append((i, j))
                     self.state_to_idx[(i, j)] = idx
                     self.idx_to_state[idx] = (i, j)
