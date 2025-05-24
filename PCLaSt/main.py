@@ -210,7 +210,7 @@ if __name__ == '__main__':
     train_args.add_argument("--dist-learn", action='store_true', default=False)
     train_args.add_argument("--contrastive", action='store_true', default=False)
 
-    train_args.add_argument("--batch_size", default=128, type=int)
+    train_args.add_argument("--batch_size", default=64, type=int)
 
     train_args.add_argument("--contrastive_k", default=1, type=int)
     train_args.add_argument("--ndiscrete", default=64, type=int)
