@@ -8,9 +8,10 @@ from minigrid.core.grid import Grid
 from minigrid.core.world_object import Wall
 from scipy.linalg import eigh
 
-class FourRoomSpectralClustering:
-    def __init__(self):
-        self.env = gym.make('MiniGrid-FourRooms-v0')
+class SpectralClustering:
+    def __init__(self, env_name='MiniGrid-FourRooms-v0'):
+        self.env_name = env_name
+        self.env = gym.make(self.env_name)
         self.env.reset()
         
         self.grid = self.env.unwrapped.grid
@@ -118,7 +119,7 @@ class FourRoomSpectralClustering:
             ax2.grid(True)
             
             plt.tight_layout()
-            # plt.show()
+            plt.show()
         
         largest_gap_idx = np.argmax(eigengaps[:10]) + 1  # +1 because we want the number of clusters
         print(f"largest eigengap suggests {largest_gap_idx} clusters")
@@ -166,8 +167,6 @@ class FourRoomSpectralClustering:
         ax.set_yticks(range(self.grid.height))
         ax.grid(True, alpha=0.1, color='gray', linewidth=0.5)
         
-        # ax.set_xlabel('X coordinate', fontsize=12)
-        # ax.set_ylabel('Y coordinate', fontsize=12)
         ax.set_title(title, fontsize=14)
         
         legend_elements = []
@@ -178,6 +177,49 @@ class FourRoomSpectralClustering:
                                            edgecolor='gray', label='Wall'))
         
         ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5))
+        
+        plt.tight_layout()
+        plt.show()
+
+    def visualize_eigenvectors(self, eigenvectors, eigenvalues, n_vecs=6, title_prefix="Eigenvector"):
+        start_idx = 1 if np.abs(eigenvalues[0]) < 1e-8 else 0
+        end_idx = start_idx + n_vecs
+        
+        n_cols = 3
+        n_rows = int(np.ceil(n_vecs / n_cols))
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 5*n_rows))
+        if n_rows == 1:
+            axes = axes.reshape(1, -1)
+        
+        for i in range(n_vecs):
+            row = i // n_cols
+            col = i % n_cols
+            ax = axes[row, col]
+            
+            vec_idx = start_idx + i
+            if vec_idx >= eigenvectors.shape[1]:
+                ax.axis('off')
+                continue
+                
+            eigenvector = eigenvectors[:, vec_idx]
+            eigenvalue = eigenvalues[vec_idx]
+            
+            vec_grid = np.full((self.env_size, self.grid.height), np.nan)
+            
+            for state_idx, (x, y) in enumerate(self.valid_states):
+                vec_grid[x, y] = eigenvector[state_idx]
+            
+            im = ax.imshow(vec_grid.T, cmap='viridis', origin='lower', interpolation='nearest', aspect='equal')
+            
+            ax.set_title(f'{title_prefix} {vec_idx+1}\n(λ = {eigenvalue:.4f})', fontsize=12)
+            ax.grid(True, alpha=0.1, color='white', linewidth=0.5)
+            plt.colorbar(im, ax=ax, shrink=0.8)
+        
+        for i in range(n_vecs, n_rows * n_cols):
+            row = i // n_cols
+            col = i % n_cols
+            axes[row, col].axis('off')
         
         plt.tight_layout()
         plt.show()
@@ -193,12 +235,15 @@ class FourRoomSpectralClustering:
         np.random.seed(random_seed)
         
         adjacency = self.build_adjacency_matrix()
-
         laplacian = self.compute_laplacian(adjacency, laplacian_type)
 
-        eigenvalues, _ = eigh(laplacian)
-        eigenvalues = np.sort(eigenvalues)
+        eigenvalues, eigenvectors = eigh(laplacian)
+        idx = np.argsort(eigenvalues)
+        eigenvalues = eigenvalues[idx]
+        eigenvectors = eigenvectors[:, idx]
+        
         self.analyze_eigenvalues(eigenvalues)
+        self.visualize_eigenvectors(eigenvectors, eigenvalues, n_vecs=6, title_prefix=f"{laplacian_type.title()} eigenvector")
         
         best_score = -1
         best_k = 4
@@ -206,9 +251,7 @@ class FourRoomSpectralClustering:
         
         for k in n_clusters_range:
             print(f"Testing k={k}")
-            cluster_labels, eigenvalues, eigenvectors, embedding = self.spectral_clustering(
-                laplacian, n_clusters=k
-            )
+            cluster_labels, eigenvalues, eigenvectors, embedding = self.spectral_clustering(laplacian, n_clusters=k)
             
             score = self.evaluate_clustering(embedding, cluster_labels)
             results[k] = {
@@ -224,32 +267,27 @@ class FourRoomSpectralClustering:
         
         print(f"\nBest number of clusters: {best_k} (Silhouette Score: {best_score:.4f})")
         
-        self.visualize_clusters(
-            results[best_k]['labels'], 
-            f"Best Spectral Clustering (k={best_k}, score={best_score:.4f})"
-        )
+        self.visualize_clusters(results[best_k]['labels'], f"Best Spectral Clustering (k={best_k}, score={best_score:.4f})")
         
         return results
 
 
 if __name__ == "__main__":
-    clustering = FourRoomSpectralClustering()
+    env_name = 'MiniGrid-FourRooms-v0'
+    clustering = SpectralClustering(env_name)
     
-    results = clustering.run(n_clusters_range=range(2, 8),laplacian_type='normalized')
+    results = clustering.run(n_clusters_range=range(2, 8), laplacian_type='normalized')
     
-    # testing different Laplacian types
-    adjacency = clustering.build_adjacency_matrix()
+    # # testing different Laplacian types
+    # adjacency = clustering.build_adjacency_matrix()
     
-    for laplacian_type in ['unnormalized', 'normalized', 'random_walk']:
-        print(f"\n--- {laplacian_type.upper()} LAPLACIAN ---")
-        laplacian = clustering.compute_laplacian(adjacency, laplacian_type)
+    # for laplacian_type in ['unnormalized', 'normalized', 'random_walk']:
+    #     print(f"\n--- {laplacian_type.upper()} LAPLACIAN ---")
+    #     laplacian = clustering.compute_laplacian(adjacency, laplacian_type)
         
-        cluster_labels, eigenvalues, eigenvectors, embedding = clustering.spectral_clustering(
-            laplacian, n_clusters=4
-        )
+    #     eigenvalues, eigenvectors = eigh(laplacian)
+    #     idx = np.argsort(eigenvalues)
+    #     eigenvalues = eigenvalues[idx]
+    #     eigenvectors = eigenvectors[:, idx]
         
-        score = clustering.evaluate_clustering(embedding, cluster_labels)
-        # clustering.visualize_clusters(
-        #     cluster_labels, 
-        #     f"{laplacian_type.title()} Laplacian (k=4, score={score:.4f})"
-        # )
+    #     clustering.visualize_eigenvectors(eigenvectors, eigenvalues, n_vecs=4, title_prefix=f"{laplacian_type.title()} eigenvector")
