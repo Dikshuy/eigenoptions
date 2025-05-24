@@ -164,7 +164,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        
         contrastive_dim = dout
         self.mixer = mixer.MLP_Mixer(n_layers=2, n_channel=32, n_hidden=32, n_output=32*4*4, image_size_h=100, image_size_w=100, patch_size=10, n_image_channel=1)
 
