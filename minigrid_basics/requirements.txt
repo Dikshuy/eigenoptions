@@ -1,0 +1,10 @@
+absl_py==2.1.0
+gin_config==0.5.0
+gym==0.23.1
+gym_minigrid==1.0.3
+matplotlib==3.10.3
+numpy==2.2.6
+plotly==6.0.1
+tyro==0.9.20
+wandb==0.19.11
+tensorflow==2.19.0
