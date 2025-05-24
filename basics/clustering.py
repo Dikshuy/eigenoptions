@@ -2,16 +2,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
-import gymnasium as gym
-from minigrid.envs import FourRoomsEnv
-from minigrid.core.grid import Grid
-from minigrid.core.world_object import Wall
 from scipy.linalg import eigh
 
+import gin
+import gym
+from minigrid_basics.envs import mon_minigrid
+from gym_minigrid import minigrid
+from gym_minigrid.wrappers import RGBImgObsWrapper
+from minigrid_basics.custom_wrappers import tabular_wrapper, mdp_wrapper
+from minigrid_basics.custom_wrappers.coloring_wrapper import ColoringWrapper
+
 class SpectralClustering:
-    def __init__(self, env_name='MiniGrid-FourRooms-v0'):
+    def __init__(self, env_name):
         self.env_name = env_name
-        self.env = gym.make(self.env_name)
+        pre_env = gym.make(self.env_name)
+        pre_env = RGBImgObsWrapper(pre_env)
+        pre_env = mdp_wrapper.MDPWrapper(pre_env)
+        self.env = tabular_wrapper.TabularWrapper(pre_env, get_rgb = True)
+
         self.env.reset()
         
         self.grid = self.env.unwrapped.grid
@@ -28,7 +36,7 @@ class SpectralClustering:
         for i in range(self.env_size):
             for j in range(self.grid.height):
                 cell = self.grid.get(i, j)
-                if cell is None or not isinstance(cell, Wall):
+                if cell is None or not isinstance(cell, minigrid.Wall):
                     self.valid_states.append((i, j))
                     self.state_to_idx[(i, j)] = idx
                     self.idx_to_state[idx] = (i, j)
@@ -267,13 +275,14 @@ class SpectralClustering:
         
         print(f"\nBest number of clusters: {best_k} (Silhouette Score: {best_score:.4f})")
         
-        self.visualize_clusters(results[best_k]['labels'], f"Best Spectral Clustering (k={best_k}, score={best_score:.4f})")
+        self.visualize_clusters(results[best_k]['labels'], f"Best Spectral Clustering with (k={best_k})")
         
         return results
 
 
 if __name__ == "__main__":
-    env_name = 'MiniGrid-FourRooms-v0'
+    gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
+    env_name = mon_minigrid.register_environment()
     clustering = SpectralClustering(env_name)
     
     results = clustering.run(n_clusters_range=range(2, 8), laplacian_type='normalized')
