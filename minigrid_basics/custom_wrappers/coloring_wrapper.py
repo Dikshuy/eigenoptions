@@ -207,7 +207,7 @@ class ColoringWrapper(tabular_wrapper.TabularWrapper):
     fig.clf()
     plt.close(fig)
 
-  def render_state_visits(self, obs, values, image_loc, cmap=cm.get_cmap('YlOrRd', 256),
+  def render_state_visits(self, obs, values, image_loc, cmap='YlOrRd',
                                 boundary_values=(None, None),
                                 boundary_colors=((255, 255, 255), (0, 0, 0))):
     assert len(values) == self.num_states, 'Invalid values length.'
