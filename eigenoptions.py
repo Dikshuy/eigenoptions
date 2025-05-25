@@ -6,13 +6,15 @@ import gym
 from minigrid_basics.envs import mon_minigrid
 from gym_minigrid.wrappers import RGBImgObsWrapper
 from minigrid_basics.custom_wrappers import tabular_wrapper, mdp_wrapper
+from minigrid_basics.custom_wrappers.coloring_wrapper import ColoringWrapper
 
 class Eigenoptions:
     def __init__(self, env_name, gamma_sr=0.9, gamma_o=0.9, n_episodes=1000, learning_rate=0.1):
         pre_env = gym.make(env_name)
         pre_env = RGBImgObsWrapper(pre_env)
         pre_env = mdp_wrapper.MDPWrapper(pre_env)
-        self.env = tabular_wrapper.TabularWrapper(pre_env, get_rgb=True)
+        self.env = ColoringWrapper(pre_env, tile_size=32)
+        
         self.gamma_sr = gamma_sr
         self.gamma_o = gamma_o
         self.n_episodes = n_episodes
@@ -110,7 +112,7 @@ class Eigenoptions:
                 for action in range(self.n_actions):
                     next_state = self.get_next_state(state, action)
                     if next_state in self.state_to_idx:
-                        j = self.state_to_idx[next_state]         
+                        j = self.state_to_idx[next_state]
                         reward = reward_function[j] - reward_function[i]
                         Q[i, action] = reward + self.gamma_o * np.max(Q[j, :])
             
@@ -133,18 +135,18 @@ class Eigenoptions:
             
             Q = self.policy_iteration(reward_function)
             
-            option_policy = {}
-            termination = {}
+            option_policy = np.full(self.env.num_states, -1)
+            termination = np.ones(self.env.num_states)
             initiation_set = set()
             
             for i, state in enumerate(self.valid_states):
+                state_idx = self.env.pos_to_state[state[0] + state[1] * self.env.width]
+                
                 if np.max(Q[i, :]) > 0:
                     initiation_set.add(state)
                     best_action = np.argmax(Q[i, :])
-                    option_policy[state] = best_action
-                    termination[state] = 0
-                else:
-                    termination[state] = 1
+                    option_policy[state_idx] = best_action
+                    termination[state_idx] = 0
             
             eigenoption = {
                 'id': k,
@@ -160,95 +162,19 @@ class Eigenoptions:
         
         return self.eigenoptions
     
-    def visualize_eigenoption(self, eigenoption_id, save_path=None):        
+    def visualize_eigenoption_policy(self, eigenoption_id, save_path_prefix=None):
         eigenoption = self.eigenoptions[eigenoption_id]
+        obs = self.env.reset()
         
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-        
-        eigenvector_grid = np.full((self.height, self.width), np.nan)
-        
-        for i, state in enumerate(self.valid_states):
-            x, y = state
-            eigenvector_grid[y, x] = eigenoption['eigenvector'][i]
-        
-        im1 = ax1.imshow(eigenvector_grid, cmap='RdBu', origin='upper')
-        ax1.set_title(f'Eigenoption {eigenoption_id} - Eigenvector Values\n'
-                     f'Eigenvalue: {eigenoption["eigenvalue"]:.4f}')
-        ax1.grid(True, alpha=0.3)
-        
-        for i in range(self.width):
-            for j in range(self.height):
-                cell = self.grid.get(i, j)
-                if cell is not None and cell.type == 'wall':
-                    ax1.add_patch(plt.Rectangle((i-0.5, j-0.5), 1, 1, 
-                                              fill=True, color='black'))
-        
-        plt.colorbar(im1, ax=ax1, shrink=0.8)
-        ax1.set_xlabel('X')
-        ax1.set_ylabel('Y')
-        
-        policy_bg = np.zeros((self.height, self.width))
-        ax2.imshow(policy_bg, cmap='gray', alpha=0.1, origin='upper')
-        
-        arrow_dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)]
-        action_names = ['>', 'v', '<', '^']
-        
-        for i, state in enumerate(self.valid_states):
-            x, y = state
-            
-            if state in eigenoption['policy']:
-                action_idx = eigenoption['policy'][state]
-                dx, dy = arrow_dirs[action_idx]
-                
-                # Color based on initiation set
-                color = 'red' if state in eigenoption['initiation_set'] else 'orange'
-                ax2.arrow(x, y, dx*0.3, dy*0.3, head_width=0.15, 
-                         head_length=0.1, fc=color, ec=color, alpha=0.8)
-                
-                # Add action symbol
-                ax2.text(x, y-0.15, action_names[action_idx], 
-                        ha='center', va='center', fontsize=8, 
-                        color='darkred', weight='bold')
-            
-            elif eigenoption['termination'].get(state, 0) == 1:
-                # Terminal state - mark with X
-                ax2.scatter(x, y, c='blue', s=100, marker='X', alpha=0.8)
-                ax2.text(x, y+0.25, 'T', ha='center', va='center', 
-                        fontsize=10, color='blue', weight='bold')
-        
-        for i in range(self.width):
-            for j in range(self.height):
-                cell = self.grid.get(i, j)
-                if cell is not None and cell.type == 'wall':
-                    ax2.add_patch(plt.Rectangle((i-0.5, j-0.5), 1, 1, 
-                                              fill=True, color='black'))
-        
-        ax2.set_title(f'Eigenoption {eigenoption_id} - Policy & Termination\n'
-                     f'Red: Policy+Initiation, Orange: Policy only, Blue X: Terminal')
-        ax2.set_xlim(-0.5, self.width-0.5)
-        ax2.set_ylim(-0.5, self.height-0.5)
-        ax2.grid(True, alpha=0.3)
-        ax2.set_xlabel('X')
-        ax2.set_ylabel('Y')
-        
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], marker='>', color='red', label='Policy (in initiation set)', 
-                   markersize=8, linestyle='None'),
-            Line2D([0], [0], marker='>', color='orange', label='Policy (not in initiation set)', 
-                   markersize=8, linestyle='None'),
-            Line2D([0], [0], marker='X', color='blue', label='Terminal states', 
-                   markersize=8, linestyle='None'),
-            Line2D([0], [0], marker='s', color='black', label='Walls', 
-                   markersize=8, linestyle='None')
-        ]
-        ax2.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.0, 1.0))
-        
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.show()
+        policy_path = f"{save_path_prefix}_policy_{eigenoption_id}.png" if save_path_prefix else f"eigenoption_{eigenoption_id}_policy.png"
+        self.env.render_option_policy(
+            obs, eigenoption, policy_path,
+            header=f"Eigenoption {eigenoption_id} Policy - ($\lambda$={eigenoption['eigenvalue']:.4f})"
+        )
+
+    def visualize_all_policies(self, save_path_prefix=None):
+        for i, eigenoption in enumerate(self.eigenoptions):
+            self.visualize_eigenoption_policy(i, save_path_prefix)
 
 def main():
     gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
@@ -259,7 +185,7 @@ def main():
     eigenoptions = agent.discover_eigenoptions(n_eigenoptions=10)
     
     for i in range(min(4, len(eigenoptions))):
-        agent.visualize_eigenoption(i)
+        agent.visualize_eigenoption_policy(i, save_path_prefix="eigenoption")
     
     return agent, eigenoptions
 
