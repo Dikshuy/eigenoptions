@@ -12,14 +12,15 @@ class Eigenoptions:
         pre_env = gym.make(env_name)
         pre_env = RGBImgObsWrapper(pre_env)
         pre_env = mdp_wrapper.MDPWrapper(pre_env)
-        self.env = tabular_wrapper.TabularWrapper(pre_env, get_rgb = True)
+        self.env = tabular_wrapper.TabularWrapper(pre_env, get_rgb=True)
         self.gamma_sr = gamma_sr
         self.gamma_o = gamma_o
         self.n_episodes = n_episodes
         self.lr = learning_rate
 
         self.grid = self.env.unwrapped.grid
-        self.size = self.grid.width
+        self.width = self.grid.width
+        self.height = self.grid.height
         self.valid_states = []
         self.state_to_idx = {}
         self.idx_to_state = {}
@@ -33,8 +34,8 @@ class Eigenoptions:
 
     def _extract_valid_states(self):
         idx = 0
-        for i in range(self.size):
-            for j in range(self.grid.height):
+        for i in range(self.width):
+            for j in range(self.height):
                 cell = self.grid.get(i, j)
                 if cell is None or (cell is not None and cell.type != 'wall'):
                     self.valid_states.append((i, j))
@@ -44,16 +45,21 @@ class Eigenoptions:
 
     def get_next_state(self, state, action):
         x, y = state
-        if action == 0:
-            next_state = (x, y - 1)
-        elif action == 1:
-            next_state = (x, y + 1)
-        elif action == 2:
-            next_state = (x - 1, y)
-        elif action == 3:
+        
+        if action == 0:  # right
             next_state = (x + 1, y)
+        elif action == 1:  # down
+            next_state = (x, y + 1)
+        elif action == 2:  # left
+            next_state = (x - 1, y)
+        elif action == 3:  # up
+            next_state = (x, y - 1)
         else:
-            raise ValueError("Invalid action")
+            raise ValueError(f"Invalid action: {action}")
+        
+        if (next_state[0] < 0 or next_state[0] >= self.width or 
+            next_state[1] < 0 or next_state[1] >= self.height):
+            return state
         
         cell = self.grid.get(*next_state)
         if cell is not None and cell.type == 'wall':
@@ -101,12 +107,12 @@ class Eigenoptions:
             Q_old = Q.copy()
             
             for i, state in enumerate(self.valid_states):
-                for a, action in enumerate(self.env.actions):
+                for action in range(self.n_actions):
                     next_state = self.get_next_state(state, action)
                     if next_state in self.state_to_idx:
-                        j = self.state_to_idx[next_state]
+                        j = self.state_to_idx[next_state]         
                         reward = reward_function[j] - reward_function[i]
-                        Q[i, a] = reward + self.gamma_o * np.max(Q[j, :])
+                        Q[i, action] = reward + self.gamma_o * np.max(Q[j, :])
             
             if np.max(np.abs(Q - Q_old)) < 1e-6:
                 break
@@ -119,7 +125,7 @@ class Eigenoptions:
         
         self.eigenoptions = []
         
-        for k in range(n_eigenoptions):
+        for k in range(min(n_eigenoptions, len(eigenvalues))):
             e = eigenvectors[:, k]
             
             # intrinsic reward function: r(s,s') = e(s') - e(s)
@@ -159,42 +165,89 @@ class Eigenoptions:
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         
-        eigenvector_grid = np.full((self.size, self.size), np.nan)
+        eigenvector_grid = np.full((self.height, self.width), np.nan)
+        
         for i, state in enumerate(self.valid_states):
-            x, y = self.env.state_to_pos(state)
+            x, y = state
             eigenvector_grid[y, x] = eigenoption['eigenvector'][i]
         
         im1 = ax1.imshow(eigenvector_grid, cmap='RdBu', origin='upper')
-        ax1.set_title(f'Eigenoption {eigenoption_id} - Eigenvector Values')
+        ax1.set_title(f'Eigenoption {eigenoption_id} - Eigenvector Values\n'
+                     f'Eigenvalue: {eigenoption["eigenvalue"]:.4f}')
         ax1.grid(True, alpha=0.3)
-        plt.colorbar(im1, ax=ax1)
         
-        policy_grid = np.full((self.env.size, self.env.size), -1)
-        for state, action_idx in eigenoption['policy'].items():
-            x, y = self.env.state_to_pos(state)
-            policy_grid[y, x] = action_idx
+        for i in range(self.width):
+            for j in range(self.height):
+                cell = self.grid.get(i, j)
+                if cell is not None and cell.type == 'wall':
+                    ax1.add_patch(plt.Rectangle((i-0.5, j-0.5), 1, 1, 
+                                              fill=True, color='black'))
         
-        arrow_dirs = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # up, down, left, right
+        plt.colorbar(im1, ax=ax1, shrink=0.8)
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
         
-        ax2.imshow(np.zeros((self.size, self.size)), cmap='gray', alpha=0.3)
+        policy_bg = np.zeros((self.height, self.width))
+        ax2.imshow(policy_bg, cmap='gray', alpha=0.1, origin='upper')
         
-        for y in range(self.size):
-            for x in range(self.size):
-                if (x, y) not in self.env.walls and policy_grid[y, x] >= 0:
-                    dx, dy = arrow_dirs[int(policy_grid[y, x])]
-                    ax2.arrow(x, y, dx*0.3, dy*0.3, head_width=0.1, 
-                             head_length=0.1, fc='red', ec='red')
+        arrow_dirs = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+        action_names = ['>', 'v', '<', '^']
         
-        ax2.set_title(f'Eigenoption {eigenoption_id} - Policy')
-        ax2.set_xlim(-0.5, self.env.size-0.5)
-        ax2.set_ylim(-0.5, self.env.size-0.5)
+        for i, state in enumerate(self.valid_states):
+            x, y = state
+            
+            if state in eigenoption['policy']:
+                action_idx = eigenoption['policy'][state]
+                dx, dy = arrow_dirs[action_idx]
+                
+                # Color based on initiation set
+                color = 'red' if state in eigenoption['initiation_set'] else 'orange'
+                ax2.arrow(x, y, dx*0.3, dy*0.3, head_width=0.15, 
+                         head_length=0.1, fc=color, ec=color, alpha=0.8)
+                
+                # Add action symbol
+                ax2.text(x, y-0.15, action_names[action_idx], 
+                        ha='center', va='center', fontsize=8, 
+                        color='darkred', weight='bold')
+            
+            elif eigenoption['termination'].get(state, 0) == 1:
+                # Terminal state - mark with X
+                ax2.scatter(x, y, c='blue', s=100, marker='X', alpha=0.8)
+                ax2.text(x, y+0.25, 'T', ha='center', va='center', 
+                        fontsize=10, color='blue', weight='bold')
+        
+        for i in range(self.width):
+            for j in range(self.height):
+                cell = self.grid.get(i, j)
+                if cell is not None and cell.type == 'wall':
+                    ax2.add_patch(plt.Rectangle((i-0.5, j-0.5), 1, 1, 
+                                              fill=True, color='black'))
+        
+        ax2.set_title(f'Eigenoption {eigenoption_id} - Policy & Termination\n'
+                     f'Red: Policy+Initiation, Orange: Policy only, Blue X: Terminal')
+        ax2.set_xlim(-0.5, self.width-0.5)
+        ax2.set_ylim(-0.5, self.height-0.5)
         ax2.grid(True, alpha=0.3)
-        ax2.invert_yaxis()
+        ax2.set_xlabel('X')
+        ax2.set_ylabel('Y')
+        
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], marker='>', color='red', label='Policy (in initiation set)', 
+                   markersize=8, linestyle='None'),
+            Line2D([0], [0], marker='>', color='orange', label='Policy (not in initiation set)', 
+                   markersize=8, linestyle='None'),
+            Line2D([0], [0], marker='X', color='blue', label='Terminal states', 
+                   markersize=8, linestyle='None'),
+            Line2D([0], [0], marker='s', color='black', label='Walls', 
+                   markersize=8, linestyle='None')
+        ]
+        ax2.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.0, 1.0))
         
         plt.tight_layout()
         
         if save_path:
-            plt.savefig(save_path)
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.show()
 
 def main():
