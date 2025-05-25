@@ -84,24 +84,45 @@ class Eigenoptions:
         
         return P
     
-    def learn_successor_representation(self):
+    def successor_representation(self):
         I = np.eye(self.n_valid_states)
         try:
-            self.Psi = np.linalg.inv(I - self.gamma_sr * self.P)
+            psi = np.linalg.inv(I - self.gamma_sr * self.P)
         except np.linalg.LinAlgError:
-            self.Psi = np.linalg.pinv(I - self.gamma_sr * self.P)
+            psi = np.linalg.pinv(I - self.gamma_sr * self.P)
         
-        return self.Psi
+        return psi
     
-    def eigendecomposition(self, Psi):
-        eigenvalues, eigenvectors = np.linalg.eig(Psi)
+    def laplacian(self):
+        degrees = np.sum(self.P, axis=1)
+        D = np.diag(degrees)
         
-        idx = np.argsort(np.abs(eigenvalues))[::-1]
-        eigenvalues = eigenvalues[idx]
-        eigenvectors = eigenvectors[:, idx]
-        
-        return eigenvalues, eigenvectors
+        # Normalized Laplacian: L = I - D^(-1/2) * P * D^(-1/2)
+        D_inv_sqrt = np.diag(1.0 / np.sqrt(degrees + 1e-8))
+        I = np.eye(len(self.P))
+        return I - D_inv_sqrt @ self.P @ D_inv_sqrt
     
+    def compute_eigenvalues(self, representation="Laplacian"):
+        if representation == "Laplacian":
+            L = self.laplacian()
+            eigenvalues, eigenvectors = np.linalg.eig(L)
+            
+            idx = np.argsort(np.abs(eigenvalues))
+            eigenvalues = eigenvalues[idx]
+            eigenvectors = eigenvectors[:, idx]
+            
+            return eigenvalues, eigenvectors
+        
+        if representation == "SR":
+            psi = self.successor_representation()
+            eigenvalues, eigenvectors = np.linalg.eig(psi)
+        
+            idx = np.argsort(np.abs(eigenvalues))[::-1]
+            eigenvalues = eigenvalues[idx]
+            eigenvectors = eigenvectors[:, idx]
+            
+            return eigenvalues, eigenvectors
+        
     def policy_iteration(self, reward_function, max_iterations=100):
         Q = np.zeros((self.n_valid_states, self.n_actions))
         
@@ -121,9 +142,8 @@ class Eigenoptions:
         
         return Q
     
-    def discover_eigenoptions(self, n_eigenoptions=10):
-        Psi = self.learn_successor_representation()
-        eigenvalues, eigenvectors = self.eigendecomposition(Psi)
+    def discover_eigenoptions(self, n_eigenoptions=10, representation="Laplacian"):
+        eigenvalues, eigenvectors = self.compute_eigenvalues(representation)
         
         self.eigenoptions = []
         
@@ -181,8 +201,10 @@ def main():
     env_name = mon_minigrid.register_environment()
     
     agent = Eigenoptions(env_name, gamma_sr=0.9, gamma_o=0.9)
+
+    representation = "Laplacian" # or "SR"
     
-    eigenoptions = agent.discover_eigenoptions(n_eigenoptions=10)
+    eigenoptions = agent.discover_eigenoptions(n_eigenoptions=10, representation=representation)
     
     for i in range(min(4, len(eigenoptions))):
         agent.visualize_eigenoption_policy(i, save_path_prefix="eigenoption")
