@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import random
 
 import gin
 import gym
@@ -8,24 +9,8 @@ from gym_minigrid.wrappers import RGBImgObsWrapper
 from minigrid_basics.custom_wrappers import tabular_wrapper, mdp_wrapper
 from minigrid_basics.custom_wrappers.coloring_wrapper import ColoringWrapper
 
-class SuccessorRepresentation:
-    def __init__(self, eta, gamma, D):
-        self.eta = eta
-        self.gamma = gamma
-        self.D = D
-
-    def SR(self):
-        psi = np.zeros((self.D.shape[0], self.D.shape[0]))
-
-        for (s, a, s_next) in self.D:
-            for i in range(self.D.shape[0]):
-                delta = 1 if i == s else 0
-                psi[s, i] += self.eta * (delta + self.gamma * psi[s_next, i] - psi[s, i])
-
-        return psi
-
 class OnlineEigenoptions:
-    def __init__(self, env_name, gamma_sr=0.9, gamma_o=0.9, n_episodes=1000, learning_rate=0.1):
+    def __init__(self, env_name, gamma_sr=0.9, gamma_o=0.9, eta_sr=0.1, eta_o=0.1, n_steps=10000):
         pre_env = gym.make(env_name)
         pre_env = RGBImgObsWrapper(pre_env)
         pre_env = mdp_wrapper.MDPWrapper(pre_env)
@@ -33,8 +18,9 @@ class OnlineEigenoptions:
         
         self.gamma_sr = gamma_sr
         self.gamma_o = gamma_o
-        self.n_episodes = n_episodes
-        self.lr = learning_rate
+        self.eta_sr = eta_sr
+        self.eta_o = eta_o
+        self.n_steps = n_steps
 
         self.grid = self.env.unwrapped.grid
         self.width = self.grid.width
@@ -46,9 +32,12 @@ class OnlineEigenoptions:
         self.n_valid_states = len(self.valid_states)
         self.n_actions = len(self.env.actions)
         
-        self.P = self._build_transition_matrix()
+        self.psi = np.zeros((self.n_valid_states, self.n_valid_states))
         
+        self.eigenoption_q_functions = []
         self.eigenoptions = []
+        
+        self.transitions = []
 
     def _extract_valid_states(self):
         idx = 0
@@ -87,89 +76,82 @@ class OnlineEigenoptions:
             return next_state
         else:
             return state
+
+    def collect_transitions(self):
+        transitions = []
         
-    def _build_transition_matrix(self):
-        P = np.zeros((self.n_valid_states, self.n_valid_states))
-        
-        for i, state in enumerate(self.valid_states):
-            for action in range(self.n_actions):
-                next_state = self.get_next_state(state, action)
-                if next_state in self.state_to_idx:
-                    j = self.state_to_idx[next_state]
-                    P[i, j] += 1.0 / self.n_actions
-        
-        return P
-    
-    def successor_representation(self):
-        I = np.eye(self.n_valid_states)
-        try:
-            psi = np.linalg.inv(I - self.gamma_sr * self.P)
-        except np.linalg.LinAlgError:
-            psi = np.linalg.pinv(I - self.gamma_sr * self.P)
-        
-        return psi
-    
-    def laplacian(self):
-        degrees = np.sum(self.P, axis=1)
-        D = np.diag(degrees)
-        
-        # Normalized Laplacian: L = I - D^(-1/2) * P * D^(-1/2)
-        D_inv_sqrt = np.diag(1.0 / np.sqrt(degrees + 1e-8))
-        I = np.eye(len(self.P))
-        return I - D_inv_sqrt @ self.P @ D_inv_sqrt
-    
-    def compute_eigenvalues(self, representation="Laplacian"):
-        if representation == "Laplacian":
-            L = self.laplacian()
-            eigenvalues, eigenvectors = np.linalg.eig(L)
+        for step in range(self.n_steps):
+            if step % 1000 == 0:
+                obs = self.env.reset()
+                current_pos = self.env.unwrapped.agent_pos
+                current_state = (current_pos[0], current_pos[1])
             
-            idx = np.argsort(np.abs(eigenvalues))
-            eigenvalues = eigenvalues[idx]
-            eigenvectors = eigenvectors[:, idx]
+            action = random.choice(range(self.n_actions))
+            next_state = self.get_next_state(current_state, action)
             
-            return eigenvalues, eigenvectors
-        
-        if representation == "SR":
-            psi = self.successor_representation()
-            eigenvalues, eigenvectors = np.linalg.eig(psi)
-        
-            idx = np.argsort(np.abs(eigenvalues))[::-1]
-            eigenvalues = eigenvalues[idx]
-            eigenvectors = eigenvectors[:, idx]
+            if current_state in self.state_to_idx and next_state in self.state_to_idx:
+                s_idx = self.state_to_idx[current_state]
+                s_prime_idx = self.state_to_idx[next_state]
+                transitions.append((s_idx, action, s_prime_idx))
             
-            return eigenvalues, eigenvectors
+            current_state = next_state
         
-    def policy_iteration(self, reward_function, max_iterations=100):
+        self.transitions = transitions
+        return transitions
+
+    def learn_successor_representation(self):
+        for step, (s, a, s_prime) in enumerate(self.transitions):
+            for i in range(self.n_valid_states):
+                indicator = 1.0 if s == i else 0.0
+                delta = indicator + self.gamma_sr * self.psi[s_prime, i] - self.psi[s, i]
+                self.psi[s, i] += self.eta_sr * delta
+        
+        return self.psi
+
+    def q_learning_for_eigenoption(self, reward_function, max_episodes=1000):
         Q = np.zeros((self.n_valid_states, self.n_actions))
         
-        for _ in range(max_iterations):
-            Q_old = Q.copy()
+        for episode in range(max_episodes):
+            start_state_idx = random.choice(range(self.n_valid_states))
+            current_state_idx = start_state_idx
             
-            for i, state in enumerate(self.valid_states):
-                for action in range(self.n_actions):
-                    next_state = self.get_next_state(state, action)
-                    if next_state in self.state_to_idx:
-                        j = self.state_to_idx[next_state]
-                        reward = reward_function[j] - reward_function[i]
-                        Q[i, action] = reward + self.gamma_o * np.max(Q[j, :])
-            
-            if np.max(np.abs(Q - Q_old)) < 1e-6:
-                break
+            for step in range(1000):    # Max steps per episode
+                current_state = self.idx_to_state[current_state_idx]
+                epsilon = max(0.1, 1.0 - episode / max_episodes)
+                if random.random() < epsilon:
+                    action = random.choice(range(self.n_actions))
+                else:
+                    action = np.argmax(Q[current_state_idx, :])
+                
+                next_state = self.get_next_state(current_state, action)
+                next_state_idx = self.state_to_idx[next_state]
+                
+                intrinsic_reward = reward_function[next_state_idx] - reward_function[current_state_idx]
+                
+                td_target = intrinsic_reward + self.gamma_o * np.max(Q[next_state_idx, :])
+                td_error = td_target - Q[current_state_idx, action]
+                Q[current_state_idx, action] += self.eta_o * td_error
+                
+                current_state_idx = next_state_idx
         
         return Q
-    
-    def discover_eigenoptions(self, n_eigenoptions=10, representation="Laplacian"):
-        eigenvalues, eigenvectors = self.compute_eigenvalues(representation)
+
+    def discover_eigenoptions_online(self, n_eigenoptions=10):
+        self.collect_transitions()
+        
+        psi = self.learn_successor_representation()
+        
+        eigenvalues, eigenvectors = np.linalg.eig(psi)
+        
+        idx = np.argsort(np.abs(eigenvalues))[::-1]
+        eigenvalues = eigenvalues[idx]
+        eigenvectors = eigenvectors[:, idx]
         
         self.eigenoptions = []
         
         for k in range(min(n_eigenoptions, len(eigenvalues))):
-            e = eigenvectors[:, k]
-            
-            # intrinsic reward function: r(s,s') = e(s') - e(s)
-            reward_function = e
-            
-            Q = self.policy_iteration(reward_function)
+            e = np.real(eigenvectors[:, k])
+            Q = self.q_learning_for_eigenoption(e, max_episodes=500)
             
             option_policy = np.full(self.env.num_states, -1)
             termination = np.ones(self.env.num_states)
@@ -216,13 +198,11 @@ def main():
     gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
     env_name = mon_minigrid.register_environment()
     
-    agent = OnlineEigenoptions(env_name, gamma_sr=0.9, gamma_o=0.9, n_episodes=1000, learning_rate=0.1)
-
-    representation = "Laplacian" # or "SR"
+    agent = OnlineEigenoptions(env_name, gamma_sr=0.9, gamma_o=0.9, eta_sr=0.1, eta_o=0.1, n_steps=100000)
     
-    eigenoptions = agent.discover_eigenoptions(n_eigenoptions=10, representation=representation)
+    eigenoptions = agent.discover_eigenoptions_online(n_eigenoptions=10)
     
-    for i in range(min(4, len(eigenoptions))):
+    for i in range(1, min(4, len(eigenoptions))):
         agent.visualize_eigenoption_policy(i, save_path_prefix="eigenoption")
     
     return agent, eigenoptions
