@@ -91,8 +91,8 @@ class OnlineEigenoptions:
             
             if current_state in self.state_to_idx and next_state in self.state_to_idx:
                 s_idx = self.state_to_idx[current_state]
-                s_prime_idx = self.state_to_idx[next_state]
-                transitions.append((s_idx, action, s_prime_idx))
+                s_next_idx = self.state_to_idx[next_state]
+                transitions.append((s_idx, action, s_next_idx))
             
             current_state = next_state
         
@@ -100,10 +100,10 @@ class OnlineEigenoptions:
         return transitions
 
     def learn_successor_representation(self):
-        for step, (s, a, s_prime) in enumerate(self.transitions):
+        for step, (s, a, s_next) in enumerate(self.transitions):
             for i in range(self.n_valid_states):
                 indicator = 1.0 if s == i else 0.0
-                delta = indicator + self.gamma_sr * self.psi[s_prime, i] - self.psi[s, i]
+                delta = indicator + self.gamma_sr * self.psi[s_next, i] - self.psi[s, i]
                 self.psi[s, i] += self.eta_sr * delta
         
         return self.psi
@@ -115,7 +115,7 @@ class OnlineEigenoptions:
             start_state_idx = random.choice(range(self.n_valid_states))
             current_state_idx = start_state_idx
             
-            for step in range(1000):    # Max steps per episode
+            for _ in range(1000):
                 current_state = self.idx_to_state[current_state_idx]
                 epsilon = max(0.1, 1.0 - episode / max_episodes)
                 if random.random() < epsilon:
