@@ -140,8 +140,8 @@ class OnlineEigenoptions:
         self.collect_transitions()
         
         psi = self.learn_successor_representation()
-        
-        eigenvalues, eigenvectors = np.linalg.eig(psi)
+        psi = (psi + psi.T) / 2.0
+        eigenvalues, eigenvectors = np.linalg.eigh(psi)
         
         idx = np.argsort(np.abs(eigenvalues))[::-1]
         eigenvalues = eigenvalues[idx]
