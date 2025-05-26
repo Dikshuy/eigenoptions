@@ -11,8 +11,8 @@ from minigrid_basics.custom_wrappers import tabular_wrapper, mdp_wrapper
 from minigrid_basics.custom_wrappers.coloring_wrapper import ColoringWrapper
 
 class CoveringEigenoptions:
-    def __init__(self, env_name, gamma_sr=0.9, gamma_o=0.9, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=5000, n_iter=10):
-        pre_env = gym.make(env_name)
+    def __init__(self, env_name, gamma_sr=0.9, gamma_o=0.9, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=1000, n_iter=10):
+        pre_env = gym.make(env_name, agent_pos=(1, 1))
         pre_env = RGBImgObsWrapper(pre_env)
         pre_env = mdp_wrapper.MDPWrapper(pre_env)
         self.env = ColoringWrapper(pre_env, tile_size=32)
@@ -103,7 +103,6 @@ class CoveringEigenoptions:
         
         for step in range(self.n_steps):
             if step % 100 == 0:
-                obs = self.env.reset()
                 current_pos = self.env.unwrapped.agent_pos
                 current_state = (current_pos[0], current_pos[1])
                 current_state_idx = self.state_to_idx[current_state]
@@ -135,11 +134,12 @@ class CoveringEigenoptions:
         return transitions
 
     def learn_successor_representation(self, transitions):
-        for step, (s, a, s_next) in enumerate(transitions):
-            for i in range(self.n_valid_states):
-                indicator = 1.0 if s == i else 0.0
-                delta = indicator + self.gamma_sr * self.psi[s_next, i] - self.psi[s, i]
-                self.psi[s, i] += self.eta_sr * delta
+        for _ in range(100): # needed?
+            for step, (s, a, s_next) in enumerate(transitions):
+                for i in range(self.n_valid_states):
+                    indicator = 1.0 if s == i else 0.0
+                    delta = indicator + self.gamma_sr * self.psi[s_next, i] - self.psi[s, i]
+                    self.psi[s, i] += self.eta_sr * delta
 
     def get_top_eigenvector(self):
         eigenvalues, eigenvectors = np.linalg.eig(self.psi)
@@ -149,42 +149,18 @@ class CoveringEigenoptions:
         
         return top_eigenvector, top_eigenvalue
 
-    def q_learning_for_eigenoption(self, reward_function, transitions, max_episodes=500):
+    def q_learning_for_eigenoption(self, reward_function, transitions, iterations=1000):
         Q = np.zeros((self.n_valid_states, self.n_actions))
         
         transition_buffer = list(transitions)
         
-        for episode in range(max_episodes):
-            episode_transitions = random.sample(transition_buffer, min(100, len(transition_buffer)))
-            
-            for s, a, s_next in episode_transitions:
+        for iter in range(iterations):
+            for s, a, s_next in transition_buffer:
                 intrinsic_reward = reward_function[s_next] - reward_function[s]
                 td_target = intrinsic_reward + self.gamma_o * np.max(Q[s_next, :])
                 td_error = td_target - Q[s, a]
                 Q[s, a] += self.eta_o * td_error
             
-            if episode % 50 == 0:
-                start_state_idx = random.choice(range(self.n_valid_states))
-                current_state_idx = start_state_idx
-                
-                for step in range(20):
-                    current_state = self.idx_to_state[current_state_idx]
-                    epsilon = max(0.1, 1.0 - episode / (max_episodes * 0.8))
-                    if random.random() < epsilon:
-                        action = random.choice(range(self.n_actions))
-                    else:
-                        action = np.argmax(Q[current_state_idx, :])
-                    
-                    next_state = self.get_next_state(current_state, action)
-                    next_state_idx = self.state_to_idx[next_state]
-                    
-                    intrinsic_reward = reward_function[next_state_idx] - reward_function[current_state_idx]
-                    td_target = intrinsic_reward + self.gamma_o * np.max(Q[next_state_idx, :])
-                    td_error = td_target - Q[current_state_idx, action]
-                    Q[current_state_idx, action] += self.eta_o * td_error
-                    
-                    current_state_idx = next_state_idx
-        
         return Q
 
     def create_option(self, Q, eigenvector, eigenvalue, option_id):
@@ -253,11 +229,11 @@ def main():
     gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
     env_name = mon_minigrid.register_environment()
     
-    agent = CoveringEigenoptions(env_name, gamma_sr=0.99, gamma_o=0.99, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=3000, n_iter=8)
+    agent = CoveringEigenoptions(env_name, gamma_sr=0.99, gamma_o=0.99, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=100, n_iter=14)
     
     covering_eigenoptions = agent.discover_covering_eigenoptions()
     
-    for i in range(1, min(6, len(covering_eigenoptions))):
+    for i in range(min(10, len(covering_eigenoptions))):
         agent.visualize_option_policy(i, save_path_prefix="covering")
     
     return agent, covering_eigenoptions
