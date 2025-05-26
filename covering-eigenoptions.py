@@ -79,11 +79,11 @@ class CoveringEigenoptions:
         else:
             return state
 
-    def execute_option(self, option, start_state):
+    def execute_option(self, option, start_state, step):
         current_state = start_state
         transitions = []
         
-        while True:
+        while step < self.n_steps:
             current_state_pos = self.idx_to_state[current_state]
             state_idx = self.env.pos_to_state[current_state_pos[0] + current_state_pos[1] * self.width]
             
@@ -96,13 +96,14 @@ class CoveringEigenoptions:
             transitions.append((current_state, action, next_state))
             current_state = next_state
         
-        return transitions, current_state
+        return transitions, current_state, step
 
     def collect_samples_with_options(self):
         transitions = []
         
         for step in range(self.n_steps):
             if step % 100 == 0:
+                obs = self.env.reset()
                 current_pos = self.env.unwrapped.agent_pos
                 current_state = (current_pos[0], current_pos[1])
                 current_state_idx = self.state_to_idx[current_state]
@@ -119,7 +120,7 @@ class CoveringEigenoptions:
                 option = random.choice(self.discovered_options)
 
                 if current_state in option['initiation_set']:   # option available from current state
-                    option_transitions, final_state_idx = self.execute_option(option, current_state_idx)
+                    option_transitions, final_state_idx, step = self.execute_option(option, current_state_idx, step)
                     transitions.extend(option_transitions)
                     current_state_idx = final_state_idx
                     current_state = self.idx_to_state[current_state_idx]
@@ -134,7 +135,7 @@ class CoveringEigenoptions:
         return transitions
 
     def learn_successor_representation(self, transitions):
-        for _ in range(100): # needed?
+        for _ in range(100):
             for step, (s, a, s_next) in enumerate(transitions):
                 for i in range(self.n_valid_states):
                     indicator = 1.0 if s == i else 0.0
@@ -142,10 +143,13 @@ class CoveringEigenoptions:
                     self.psi[s, i] += self.eta_sr * delta
 
     def get_top_eigenvector(self):
-        eigenvalues, eigenvectors = np.linalg.eig(self.psi)
+        self.psi = (self.psi + self.psi.T)/2.0
+        eigenvalues, eigenvectors = np.linalg.eigh(self.psi)
         idx = np.argsort(np.abs(eigenvalues))[::-1]
-        top_eigenvector = np.real(eigenvectors[:, idx[1]])
-        top_eigenvalue = eigenvalues[idx[1]]
+        top_eigenvector = eigenvectors[:, idx[0]]
+        top_eigenvalue = eigenvalues[idx[0]]
+        if sum(top_eigenvector) > 0:
+            top_eigenvector = -top_eigenvector
         
         return top_eigenvector, top_eigenvalue
 
@@ -208,6 +212,8 @@ class CoveringEigenoptions:
             
             new_option = self.create_option(Q, top_eigenvector, top_eigenvalue, len(self.discovered_options))
             self.discovered_options.append(new_option)
+
+            self.visualize_option_policy(iteration, save_path_prefix="covering")
         
         return self.discovered_options
 
@@ -229,12 +235,12 @@ def main():
     gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
     env_name = mon_minigrid.register_environment()
     
-    agent = CoveringEigenoptions(env_name, gamma_sr=0.99, gamma_o=0.99, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=100, n_iter=14)
+    agent = CoveringEigenoptions(env_name, gamma_sr=0.99, gamma_o=0.99, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=100, n_iter=50)
     
     covering_eigenoptions = agent.discover_covering_eigenoptions()
     
-    for i in range(min(10, len(covering_eigenoptions))):
-        agent.visualize_option_policy(i, save_path_prefix="covering")
+    # for i in range(min(10, len(covering_eigenoptions))):
+    #     agent.visualize_option_policy(i, save_path_prefix="covering")
     
     return agent, covering_eigenoptions
 
