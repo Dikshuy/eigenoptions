@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import defaultdict
 import random
 
 import gin
@@ -9,8 +10,8 @@ from gym_minigrid.wrappers import RGBImgObsWrapper
 from minigrid_basics.custom_wrappers import tabular_wrapper, mdp_wrapper
 from minigrid_basics.custom_wrappers.coloring_wrapper import ColoringWrapper
 
-class OnlineEigenoptions:
-    def __init__(self, env_name, gamma_sr=0.9, gamma_o=0.9, eta_sr=0.1, eta_o=0.1, n_steps=10000, n_iterations=1000):
+class CoveringEigenoptions:
+    def __init__(self, env_name, gamma_sr=0.9, gamma_o=0.9, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=5000, n_iter=10):
         pre_env = gym.make(env_name)
         pre_env = RGBImgObsWrapper(pre_env)
         pre_env = mdp_wrapper.MDPWrapper(pre_env)
@@ -20,8 +21,9 @@ class OnlineEigenoptions:
         self.gamma_o = gamma_o
         self.eta_sr = eta_sr
         self.eta_o = eta_o
+        self.p_option = p_option
         self.n_steps = n_steps
-        self.n_iterations = n_iterations
+        self.n_iter = n_iter
 
         self.grid = self.env.unwrapped.grid
         self.width = self.grid.width
@@ -35,10 +37,9 @@ class OnlineEigenoptions:
         
         self.psi = np.zeros((self.n_valid_states, self.n_valid_states))
         
-        self.eigenoption_q_functions = []
-        self.eigenoptions = []
+        self.discovered_options = []
         
-        self.transitions = []
+        self.all_transitions = []
 
     def _extract_valid_states(self):
         idx = 0
@@ -78,136 +79,188 @@ class OnlineEigenoptions:
         else:
             return state
 
-    def collect_transitions(self):
+    def execute_option(self, option, start_state):
+        current_state = start_state
+        transitions = []
+        
+        while True:
+            current_state_pos = self.idx_to_state[current_state]
+            state_idx = self.env.pos_to_state[current_state_pos[0] + current_state_pos[1] * self.width]
+            
+            if option['termination'][state_idx] == 1:
+                break
+            
+            action = option['policy'][state_idx]
+            next_state_pos = self.get_next_state(current_state_pos, action)
+            next_state = self.state_to_idx[next_state_pos]
+            transitions.append((current_state, action, next_state))
+            current_state = next_state
+        
+        return transitions, current_state
+
+    def collect_samples_with_options(self):
         transitions = []
         
         for step in range(self.n_steps):
-            if step % 1000 == 0:
+            if step % 100 == 0:
                 obs = self.env.reset()
                 current_pos = self.env.unwrapped.agent_pos
                 current_state = (current_pos[0], current_pos[1])
+                current_state_idx = self.state_to_idx[current_state]
             
-            action = random.choice(range(self.n_actions))
-            next_state = self.get_next_state(current_state, action)
-            
-            if current_state in self.state_to_idx and next_state in self.state_to_idx:
-                s_idx = self.state_to_idx[current_state]
-                s_next_idx = self.state_to_idx[next_state]
-                transitions.append((s_idx, action, s_next_idx))
-            
-            current_state = next_state
-        
-        self.transitions = transitions
+            if random.random() < (1 - self.p_option) or len(self.discovered_options) == 0:
+                action = random.choice(range(self.n_actions))
+                next_state = self.get_next_state(current_state, action)
+                next_state_idx = self.state_to_idx[next_state]
+                transitions.append((current_state_idx, action, next_state_idx))
+                current_state = next_state
+                current_state_idx = next_state_idx
+                
+            else:
+                option = random.choice(self.discovered_options)
+
+                if current_state in option['initiation_set']:   # option available from current state
+                    option_transitions, final_state_idx = self.execute_option(option, current_state_idx)
+                    transitions.extend(option_transitions)
+                    current_state_idx = final_state_idx
+                    current_state = self.idx_to_state[current_state_idx]
+                else:   # take primitive action
+                    action = random.choice(range(self.n_actions))
+                    next_state = self.get_next_state(current_state, action)
+                    next_state_idx = self.state_to_idx[next_state]
+                    transitions.append((current_state_idx, action, next_state_idx))
+                    current_state = next_state
+                    current_state_idx = next_state_idx
+
         return transitions
 
-    def learn_successor_representation(self):
-        for step, (s, a, s_next) in enumerate(self.transitions):
+    def learn_successor_representation(self, transitions):
+        for step, (s, a, s_next) in enumerate(transitions):
             for i in range(self.n_valid_states):
                 indicator = 1.0 if s == i else 0.0
                 delta = indicator + self.gamma_sr * self.psi[s_next, i] - self.psi[s, i]
                 self.psi[s, i] += self.eta_sr * delta
-        
-        return self.psi
 
-    def q_learning_for_eigenoption(self, reward_function, max_episodes=1000):
+    def get_top_eigenvector(self):
+        eigenvalues, eigenvectors = np.linalg.eig(self.psi)
+        idx = np.argsort(np.abs(eigenvalues))[::-1]
+        top_eigenvector = np.real(eigenvectors[:, idx[1]])
+        top_eigenvalue = eigenvalues[idx[1]]
+        
+        return top_eigenvector, top_eigenvalue
+
+    def q_learning_for_eigenoption(self, reward_function, transitions, max_episodes=500):
         Q = np.zeros((self.n_valid_states, self.n_actions))
         
+        transition_buffer = list(transitions)
+        
         for episode in range(max_episodes):
-            start_state_idx = random.choice(range(self.n_valid_states))
-            current_state_idx = start_state_idx
+            episode_transitions = random.sample(transition_buffer, min(100, len(transition_buffer)))
             
-            for _ in range(1000):
-                current_state = self.idx_to_state[current_state_idx]
-                epsilon = max(0.1, 1.0 - episode / max_episodes)
-                if random.random() < epsilon:
-                    action = random.choice(range(self.n_actions))
-                else:
-                    action = np.argmax(Q[current_state_idx, :])
+            for s, a, s_next in episode_transitions:
+                intrinsic_reward = reward_function[s_next] - reward_function[s]
+                td_target = intrinsic_reward + self.gamma_o * np.max(Q[s_next, :])
+                td_error = td_target - Q[s, a]
+                Q[s, a] += self.eta_o * td_error
+            
+            if episode % 50 == 0:
+                start_state_idx = random.choice(range(self.n_valid_states))
+                current_state_idx = start_state_idx
                 
-                next_state = self.get_next_state(current_state, action)
-                next_state_idx = self.state_to_idx[next_state]
-                
-                intrinsic_reward = reward_function[next_state_idx] - reward_function[current_state_idx]
-                
-                td_target = intrinsic_reward + self.gamma_o * np.max(Q[next_state_idx, :])
-                td_error = td_target - Q[current_state_idx, action]
-                Q[current_state_idx, action] += self.eta_o * td_error
-                
-                current_state_idx = next_state_idx
+                for step in range(20):
+                    current_state = self.idx_to_state[current_state_idx]
+                    epsilon = max(0.1, 1.0 - episode / (max_episodes * 0.8))
+                    if random.random() < epsilon:
+                        action = random.choice(range(self.n_actions))
+                    else:
+                        action = np.argmax(Q[current_state_idx, :])
+                    
+                    next_state = self.get_next_state(current_state, action)
+                    next_state_idx = self.state_to_idx[next_state]
+                    
+                    intrinsic_reward = reward_function[next_state_idx] - reward_function[current_state_idx]
+                    td_target = intrinsic_reward + self.gamma_o * np.max(Q[next_state_idx, :])
+                    td_error = td_target - Q[current_state_idx, action]
+                    Q[current_state_idx, action] += self.eta_o * td_error
+                    
+                    current_state_idx = next_state_idx
         
         return Q
 
-    def discover_covering_eigenoptions(self, n_eigenoptions=10):
-        for _ in range(self.n_iterations):
-            self.collect_transitions()
-            
-            psi = self.learn_successor_representation()
-            
-            eigenvalues, eigenvectors = np.linalg.eig(psi)
-            
-            idx = np.argsort(np.abs(eigenvalues))[::-1]
-            eigenvalues = eigenvalues[idx]
-            eigenvectors = eigenvectors[:, idx]
-            
-            self.eigenoptions = []
-            
-            for k in range(min(n_eigenoptions, len(eigenvalues))):
-                e = np.real(eigenvectors[:, k])
-                Q = self.q_learning_for_eigenoption(e, max_episodes=500)
-                
-                option_policy = np.full(self.env.num_states, -1)
-                termination = np.ones(self.env.num_states)
-                initiation_set = set()
-                
-                for i, state in enumerate(self.valid_states):
-                    state_idx = self.env.pos_to_state[state[0] + state[1] * self.env.width]
-                    
-                    if np.max(Q[i, :]) > 0:
-                        initiation_set.add(state)
-                        best_action = np.argmax(Q[i, :])
-                        option_policy[state_idx] = best_action
-                        termination[state_idx] = 0
-                
-                eigenoption = {
-                    'id': k,
-                    'eigenvalue': eigenvalues[k],
-                    'eigenvector': e,
-                    'initiation_set': initiation_set,
-                    'policy': option_policy,
-                    'termination': termination,
-                    'Q_function': Q
-                }
-                
-                self.eigenoptions.append(eigenoption)
+    def create_option(self, Q, eigenvector, eigenvalue, option_id):
+        option_policy = np.full(self.env.num_states, -1)
+        termination = np.ones(self.env.num_states)
+        initiation_set = set()
         
-        return self.eigenoptions
-    
-    def visualize_eigenoption_policy(self, eigenoption_id, save_path_prefix=None):
-        eigenoption = self.eigenoptions[eigenoption_id]
+        for i, state in enumerate(self.valid_states):
+            state_idx = self.env.pos_to_state[state[0] + state[1] * self.env.width]
+            
+            if np.max(Q[i, :]) > 0:
+                initiation_set.add(state)
+                best_action = np.argmax(Q[i, :])
+                option_policy[state_idx] = best_action
+                termination[state_idx] = 0
+        
+        option = {
+            'id': option_id,
+            'eigenvalue': eigenvalue,
+            'eigenvector': eigenvector,
+            'initiation_set': initiation_set,
+            'policy': option_policy,
+            'termination': termination,
+            'Q_function': Q
+        }
+        
+        return option
+
+    def discover_covering_eigenoptions(self):
+        self.all_transitions = []
+        self.discovered_options = []
+        
+        # ROD cycle
+        for iteration in range(self.n_iter):
+            print(f"Iteration: {iteration + 1}/{self.n_iter}")
+            
+            new_transitions = self.collect_samples_with_options()
+            self.all_transitions.extend(new_transitions)
+            
+            self.learn_successor_representation(self.all_transitions)
+            
+            top_eigenvector, top_eigenvalue = self.get_top_eigenvector()
+            
+            Q = self.q_learning_for_eigenoption(top_eigenvector, self.all_transitions)
+            
+            new_option = self.create_option(Q, top_eigenvector, top_eigenvalue, len(self.discovered_options))
+            self.discovered_options.append(new_option)
+        
+        return self.discovered_options
+
+    def visualize_option_policy(self, option_id, save_path_prefix=None):
+        option = self.discovered_options[option_id]
         obs = self.env.reset()
         
-        policy_path = f"{save_path_prefix}_policy_{eigenoption_id}.png" if save_path_prefix else f"eigenoption_{eigenoption_id}_policy.png"
+        policy_path = f"{save_path_prefix}_eigenoption_policy_{option_id}.png" if save_path_prefix else f"covering_eigenoption_policy_{option_id}.png"
         self.env.render_option_policy(
-            obs, eigenoption, policy_path,
-            header=f"Eigenoption {eigenoption_id} Policy - ($\lambda$={eigenoption['eigenvalue']:.4f})"
+            obs, option, policy_path,
+            header=f"Covering EigenOption {option_id} Policy - ($\lambda$={option['eigenvalue']:.4f})"
         )
 
     def visualize_all_policies(self, save_path_prefix=None):
-        for i, eigenoption in enumerate(self.eigenoptions):
-            self.visualize_eigenoption_policy(i, save_path_prefix)
+        for i, option in enumerate(self.discovered_options):
+            self.visualize_option_policy(i, save_path_prefix)
 
 def main():
     gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
     env_name = mon_minigrid.register_environment()
     
-    agent = OnlineEigenoptions(env_name, gamma_sr=0.9, gamma_o=0.9, eta_sr=0.1, eta_o=0.1, n_steps=10000, n_iterations=1000)
+    agent = CoveringEigenoptions(env_name, gamma_sr=0.99, gamma_o=0.99, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=3000, n_iter=8)
     
-    eigenoptions = agent.discover_covering_eigenoptions(n_eigenoptions=10)
+    covering_eigenoptions = agent.discover_covering_eigenoptions()
     
-    for i in range(1, min(4, len(eigenoptions))):
-        agent.visualize_eigenoption_policy(i, save_path_prefix="eigenoption")
+    for i in range(1, min(6, len(covering_eigenoptions))):
+        agent.visualize_option_policy(i, save_path_prefix="covering")
     
-    return agent, eigenoptions
+    return agent, covering_eigenoptions
 
 if __name__ == "__main__":
-    agent, eigenoptions = main()
+    agent, options = main()
