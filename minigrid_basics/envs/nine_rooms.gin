@@ -4,12 +4,12 @@ MonMiniGridEnv.directional = True
 MonMiniGridEnv.agent_pos = None
 MonMiniGridEnv.goal_pos = None
 MonMiniGridEnv.ascii_grid = """
-XXXXXXXXX
-XXXXXXX X
-XXXXXXX X
-XXXXXXX X
-X       X
-XXXXXXX X
-XXXXXXX X
-XXXXXXX X
-XXXXXXXXX"""
+*********
+******* *
+******* *
+******* *
+*       *
+******* *
+******* *
+******* *
+*********"""
