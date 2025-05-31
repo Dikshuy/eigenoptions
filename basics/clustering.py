@@ -83,7 +83,7 @@ class SpectralClustering:
         else:
             raise ValueError("laplacian_type must be 'unnormalized', 'normalized', or 'random_walk'")
     
-    def spectral_clustering(self, laplacian, n_clusters=4):
+    def spectral_clustering(self, laplacian, n_clusters=4, scale=False):
         eigenvalues, eigenvectors = eigh(laplacian)
         
         idx = np.argsort(eigenvalues)
@@ -93,8 +93,13 @@ class SpectralClustering:
         # first n_clusters eigenvectors (excluding the first for normalized Laplacian)
         if np.abs(eigenvalues[0]) < 1e-8:  # first eigenvalue is approximately 0
             embedding = eigenvectors[:, 1:n_clusters+1]
+            selected_eigenvalues = eigenvalues[1:n_clusters+1]
         else:
             embedding = eigenvectors[:, :n_clusters]
+            selected_eigenvalues = eigenvalues[:n_clusters]
+
+        if scale:
+            embedding = embedding / np.sqrt(selected_eigenvalues[np.newaxis, :])
         
         embedding_norm = np.linalg.norm(embedding, axis=1, keepdims=True)
         embedding_norm[embedding_norm == 0] = 1
@@ -238,8 +243,8 @@ class SpectralClustering:
             return silhouette
         return None
     
-    def run(self, n_clusters_range=range(2, 8), laplacian_type='normalized', random_seed=42):
-        np.random.seed(random_seed)
+    def run(self, n_clusters_range=range(2, 8), laplacian_type='normalized', scale=False, random_seed=42):
+        # np.random.seed(random_seed)
         
         adjacency = self.build_adjacency_matrix()
         laplacian = self.compute_laplacian(adjacency, laplacian_type)
@@ -258,7 +263,7 @@ class SpectralClustering:
         
         for k in n_clusters_range:
             print(f"Testing k={k}")
-            cluster_labels, eigenvalues, eigenvectors, embedding = self.spectral_clustering(laplacian, n_clusters=k)
+            cluster_labels, eigenvalues, eigenvectors, embedding = self.spectral_clustering(laplacian, n_clusters=k, scale=scale)
             
             score = self.evaluate_clustering(embedding, cluster_labels)
             results[k] = {
@@ -280,11 +285,11 @@ class SpectralClustering:
 
 
 if __name__ == "__main__":
-    gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
+    gin.parse_config_file('minigrid_basics/envs/sixteen_rooms.gin')
     env_name = mon_minigrid.register_environment()
     clustering = SpectralClustering(env_name)
     
-    results = clustering.run(n_clusters_range=range(2, 8), laplacian_type='normalized')
+    results = clustering.run(n_clusters_range=range(2, 20), laplacian_type='normalized', scale=False)
     
     # # testing different Laplacian types
     # adjacency = clustering.build_adjacency_matrix()
