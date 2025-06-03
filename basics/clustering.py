@@ -287,7 +287,7 @@ class SpectralClustering:
 
 
 if __name__ == "__main__":
-    gin.parse_config_file('minigrid_basics/envs/puzzle.gin')
+    gin.parse_config_file('minigrid_basics/envs/multi_room.gin')
     env_name = mon_minigrid.register_environment()
     clustering = SpectralClustering(env_name)
     
