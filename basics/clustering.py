@@ -144,7 +144,7 @@ class SpectralClustering:
         for idx, (x, y) in enumerate(self.valid_states):
             cluster_grid[x, y] = cluster_labels[idx]
         
-        fig, ax = plt.subplots(figsize=(12, 10))
+        fig, ax = plt.subplots(figsize=(10, 8))
         
         n_clusters = len(np.unique(cluster_labels))
         colors = plt.cm.Set3(np.linspace(0, 1, n_clusters))
@@ -276,6 +276,8 @@ class SpectralClustering:
             if score and score > best_score:
                 best_score = score
                 best_k = k
+
+            self.visualize_clusters(results[k]['labels'], f"Spectral Clustering with (k={k})") 
         
         print(f"\nBest number of clusters: {best_k} (Silhouette Score: {best_score:.4f})")
         
@@ -285,11 +287,11 @@ class SpectralClustering:
 
 
 if __name__ == "__main__":
-    gin.parse_config_file('minigrid_basics/envs/sixteen_rooms.gin')
+    gin.parse_config_file('minigrid_basics/envs/puzzle.gin')
     env_name = mon_minigrid.register_environment()
     clustering = SpectralClustering(env_name)
     
-    results = clustering.run(n_clusters_range=range(2, 20), laplacian_type='normalized', scale=False)
+    results = clustering.run(n_clusters_range=range(2, 14), laplacian_type='normalized', scale=True)
     
     # # testing different Laplacian types
     # adjacency = clustering.build_adjacency_matrix()
