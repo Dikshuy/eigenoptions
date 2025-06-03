@@ -1,0 +1,20 @@
+# spiral room
+register_environment.env_id = 'MiniGrid-Spiral-v0'
+
+MonMiniGridEnv.directional = True
+MonMiniGridEnv.agent_pos = None
+MonMiniGridEnv.goal_pos = None
+MonMiniGridEnv.ascii_grid = """
+*************
+*           *
+* ********* *
+* *       * *
+* * ***** * *
+* * *   * * *
+* * * * * * *
+* * * *** * *
+* * *     * *
+* * ******* *
+* *         *
+* ***********
+*************"""
