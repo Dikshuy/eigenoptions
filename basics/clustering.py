@@ -85,25 +85,12 @@ class SpectralClustering:
     
     def spectral_clustering(self, laplacian, n_clusters=4, scale=False):
         eigenvalues, eigenvectors = eigh(laplacian)
-        
-        idx = np.argsort(eigenvalues)
-        eigenvalues = eigenvalues[idx]
-        eigenvectors = eigenvectors[:, idx]
-        
-        # first n_clusters eigenvectors (excluding the first for normalized Laplacian)
-        if np.abs(eigenvalues[0]) < 1e-8:  # first eigenvalue is approximately 0
-            embedding = eigenvectors[:, 1:n_clusters+1]
-            selected_eigenvalues = eigenvalues[1:n_clusters+1]
-        else:
-            embedding = eigenvectors[:, :n_clusters]
-            selected_eigenvalues = eigenvalues[:n_clusters]
+    
+        embedding = eigenvectors[:, 1:n_clusters+1]
+        selected_eigenvalues = eigenvalues[1:n_clusters+1]
 
         if scale:
             embedding = embedding / np.sqrt(selected_eigenvalues[np.newaxis, :])
-        
-        embedding_norm = np.linalg.norm(embedding, axis=1, keepdims=True)
-        embedding_norm[embedding_norm == 0] = 1
-        embedding = embedding / embedding_norm
         
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=20)
         cluster_labels = kmeans.fit_predict(embedding)
