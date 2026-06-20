@@ -251,11 +251,17 @@ def main():
     gin.parse_config_file('minigrid_basics/envs/classic_fourrooms.gin')
     env_name = mon_minigrid.register_environment()
 
+    print("Discovering covering eigenoptions...")
     agent = CoveringEigenoptions(env_name, gamma_sr=0.99, gamma_o=0.99, eta_sr=0.1, eta_o=0.1, p_option=0.05, n_steps=100, n_iter=50)
     covering_eigenoptions = agent.discover_covering_eigenoptions()
 
+    print("\nEvaluating cover times...")
+    print("\nEstimating random-walk cover time...")
     random_walk_stats = agent.estimate_random_walk_cover_time(n_seeds=100, save_heatmap_prefix="random_walk")
+    print("\nEstimating covering eigenoptions (CEO) cover time...")
     ceo_stats = agent.estimate_cover_time_with_options(n_seeds=100, save_heatmap_prefix="ceo")
+
+    print(f"="*40)
     print(f"Random-walk cover time: {random_walk_stats}")
     print(f"Covering eigenoptions (CEO) cover time: {ceo_stats}")
 
